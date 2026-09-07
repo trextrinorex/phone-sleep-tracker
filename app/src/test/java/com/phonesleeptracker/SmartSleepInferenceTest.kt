@@ -53,6 +53,7 @@ class SmartSleepInferenceTest {
             result.session.confidence >= 80
         )
         assertEquals(480L, result.session.durationMinutes)
+        assertEquals("High", result.confidenceBand)
     }
 
     @Test
@@ -85,13 +86,12 @@ class SmartSleepInferenceTest {
         val start = LocalDateTime.of(2026, 9, 6, 23, 0)
         val signals = listOf(
             activity(start),
-            activity(start.plusHours(3).plusMinutes(30)), // brief interaction
+            activity(start.plusHours(3).plusMinutes(30)),
             activity(start.plusHours(3).plusMinutes(32)),
             activity(start.plusHours(8))
         )
         val result = SmartSleepInference.infer(signals)
         assertNotNull(result)
-        // After merging we expect roughly the full 8-hour window
         assertTrue(
             "Expected merged duration near 8h, got ${result!!.session.durationMinutes}",
             result.session.durationMinutes >= 470
@@ -100,7 +100,7 @@ class SmartSleepInferenceTest {
     }
 
     @Test
-    fun historicalBedtimeBoostsScore() {
+    fun historicalMedianBedtimeBoostsScore() {
         val base = LocalDateTime.of(2026, 9, 6, 23, 10)
         val signals = listOf(
             activity(base),
@@ -111,16 +111,20 @@ class SmartSleepInferenceTest {
         val withHistory = SmartSleepInference.infer(
             signals = signals,
             personalStats = SmartSleepInference.PersonalStats(
-                typicalBedtime = LocalTime.of(23, 5),
-                typicalWakeTime = LocalTime.of(6, 40),
-                meanDurationMinutes = 450
+                medianBedtime = LocalTime.of(23, 5),
+                bedtimeMadMinutes = 25,
+                medianWakeTime = LocalTime.of(6, 40),
+                wakeMadMinutes = 20,
+                medianDurationMinutes = 450,
+                durationMadMinutes = 30,
+                sampleSize = 10
             )
         )
 
         assertNotNull(withoutHistory)
         assertNotNull(withHistory)
         assertTrue(
-            "History should not decrease score", 
+            "History should not decrease score",
             withHistory!!.session.confidence >= withoutHistory!!.session.confidence
         )
     }
@@ -144,5 +148,22 @@ class SmartSleepInferenceTest {
             "Screen-on events should reduce confidence ($quietScore vs $noisyScore)",
             noisyScore < quietScore
         )
+    }
+
+    @Test
+    fun breakdownContainsExpectedKeys() {
+        val base = LocalDateTime.of(2026, 9, 6, 23, 0)
+        val signals = listOf(
+            activity(base),
+            activity(base.plusHours(7))
+        )
+        val result = SmartSleepInference.infer(signals)
+        assertNotNull(result)
+        val keys = result!!.scoreBreakdown.keys
+        assertTrue(keys.contains("duration"))
+        assertTrue(keys.contains("nighttime"))
+        assertTrue(keys.contains("bedtime_match"))
+        assertTrue(keys.contains("wake_match"))
+        assertTrue(keys.contains("screen_quiet"))
     }
 }
