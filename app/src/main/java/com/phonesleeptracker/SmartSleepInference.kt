@@ -4,18 +4,12 @@ import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
 
-/**
- * Scores inactivity windows using several phone-level signals.
- * It intentionally reports an estimate rather than claiming to measure sleep stages.
- */
+/** Multi-signal sleep estimator. It estimates sleep; it does not measure sleep stages. */
 object SmartSleepInference {
     private const val MIN_GAP_MINUTES = 240L
     private const val MAX_GAP_MINUTES = 14L * 60L
 
-    data class Result(
-        val session: SleepSession,
-        val scoreBreakdown: Map<String, Int>
-    )
+    data class Result(val session: SleepSession, val scoreBreakdown: Map<String, Int>)
 
     fun infer(
         signals: List<PhoneSignal>,
@@ -30,14 +24,14 @@ object SmartSleepInference {
         var best: Result? = null
         activity.zipWithNext().forEach { (previous, next) ->
             val minutes = Duration.between(previous.time, next.time).toMinutes()
-            if (minutes < MIN_GAP_MINUTES || minutes > MAX_GAP_MINUTES) return@forEach
-
+            if (minutes !in MIN_GAP_MINUTES..MAX_GAP_MINUTES) return@forEach
             val nearby = sorted.filter {
                 !it.time.isBefore(previous.time.minusMinutes(30)) &&
                     !it.time.isAfter(next.time.plusMinutes(30))
             }
-            val score = scoreWindow(previous.time, next.time, nearby, typicalSleepStart, typicalWakeTime)
-            val candidate = Result(SleepSession(previous.time, next.time, score), mapScore(previous.time, next.time, nearby, typicalSleepStart, typicalWakeTime))
+            val breakdown = scoreWindow(previous.time, next.time, nearby, typicalSleepStart, typicalWakeTime)
+            val score = breakdown.values.sum().coerceIn(0, 100)
+            val candidate = Result(SleepSession(previous.time, next.time, score), breakdown)
             if (best == null || candidate.session.confidence > best!!.session.confidence ||
                 (candidate.session.confidence == best!!.session.confidence && candidate.session.durationMinutes > best!!.session.durationMinutes)) {
                 best = candidate
@@ -52,29 +46,16 @@ object SmartSleepInference {
         nearby: List<PhoneSignal>,
         sleepStart: LocalTime,
         wakeTime: LocalTime
-    ): Int = mapScore(start, end, nearby, sleepStart, wakeTime).values.sum().coerceIn(0, 100)
-
-    private fun mapScore(
-        start: LocalDateTime,
-        end: LocalDateTime,
-        nearby: List<PhoneSignal>,
-        sleepStart: LocalTime,
-        wakeTime: LocalTime
     ): Map<String, Int> {
         val duration = Duration.between(start, end).toMinutes()
-        val night = isNight(start.toLocalTime(), sleepStart, wakeTime)
+        val nighttime = isNight(start.toLocalTime(), sleepStart, wakeTime)
         val screenQuiet = nearby.none { it.type == PhoneSignal.Type.SCREEN_ON }
-        val charging = nearby.any { it.type == PhoneSignal.Type.CHARGING_START }
-
+        val charged = nearby.any { it.type == PhoneSignal.Type.CHARGING_START }
         return mapOf(
-            "duration" to when {
-                duration >= 480 -> 35
-                duration >= 360 -> 28
-                else -> 20
-            },
-            "nighttime" to if (night) 30 else 8,
+            "duration" to when { duration >= 480 -> 35; duration >= 360 -> 28; else -> 20 },
+            "nighttime" to if (nighttime) 30 else 8,
             "screen_quiet" to if (screenQuiet) 20 else 4,
-            "charging" to if (charging) 15 else 0
+            "charging" to if (charged) 15 else 0
         )
     }
 
