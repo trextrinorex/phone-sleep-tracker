@@ -5,9 +5,8 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * First-pass phone-only sleep inference. This deliberately produces an estimate,
- * not a medical measurement. Later versions can replace the scoring model with
- * a personalized on-device ML model.
+ * First-pass phone-only sleep inference. This produces an estimate, not a
+ * medical measurement. Later versions can replace scoring with on-device ML.
  */
 object SleepInferenceEngine {
     private const val MIN_INACTIVITY_MINUTES = 240L
@@ -16,8 +15,8 @@ object SleepInferenceEngine {
     fun infer(
         lastActivity: LocalDateTime,
         firstActivity: LocalDateTime,
-        typicalSleepStart: LocalTime = LocalTime.of(22, 0),
-        typicalWakeTime: LocalTime = LocalTime.of(9, 0)
+        typicalSleepStart: LocalTime = LocalTime.of(21, 0),
+        typicalWakeTime: LocalTime = LocalTime.of(10, 0)
     ): SleepSession? {
         val duration = Duration.between(lastActivity, firstActivity).toMinutes()
         if (duration < MIN_INACTIVITY_MINUTES) return null
@@ -29,15 +28,10 @@ object SleepInferenceEngine {
             duration >= 480 -> 62
             else -> 45
         }
-
         return SleepSession(lastActivity, firstActivity, confidence)
     }
 
-    private fun isLikelyNighttime(
-        time: LocalTime,
-        sleepStart: LocalTime,
-        wakeTime: LocalTime
-    ): Boolean {
+    private fun isLikelyNighttime(time: LocalTime, sleepStart: LocalTime, wakeTime: LocalTime): Boolean {
         return if (sleepStart <= wakeTime) {
             time >= sleepStart && time <= wakeTime
         } else {
