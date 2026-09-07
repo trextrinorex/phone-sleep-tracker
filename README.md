@@ -16,77 +16,87 @@ It is **not** a medical device and does **not** measure:
 
 Never treat the numbers as clinical truth. Confidence scores are heuristic, not scientifically validated accuracy percentages.
 
-## What the MVP currently does
+## Current status (v0.4.0)
 
-- Jetpack Compose UI with clear onboarding and permanent non-medical disclaimer
-- Reliable Usage Access permission detection and settings deep-link
-- Passive collection of foreground-app and screen-interactive timestamps via UsageStats
-- Multi-signal sleep inference engine (`SmartSleepInference`):
-  - Detects 4–14 hour inactivity candidates
-  - Transparent scoring (duration, nighttime, charging, screen quiet, historical proximity)
-  - Merges brief interruptions inside likely sleep windows
-  - Rejects unrealistically long gaps and strongly prefers nighttime windows
-- Simple on-device personalization from recent stored sessions (typical bedtime / wake / duration)
-- Local Room database with overlap-based duplicate protection
-- Periodic WorkManager background processing
-- Sleep history dashboard showing estimated duration, time window, and confidence band
-- Unit tests for core inference rules
+### Build & CI foundation
+- Gradle Wrapper configuration (Gradle 8.11.1)
+- GitHub Actions CI: unit tests + `assembleDebug` on every push/PR to `main`
+- Debug APK uploaded as CI artifact
 
-## How it works (high level)
+### Inference engine
+- Multi-signal candidate detection (4–14 h inactivity)
+- Brief interruption merging
+- Transparent multi-factor scoring with full breakdown
+- BatteryManager charging signal as *supporting evidence only*
+- Robust 14-night personalization using **median + MAD** (median absolute deviation)
+- Overlap-based duplicate protection
+- Confidence bands: High / Moderate / Low
 
-1. User grants Usage Access (special Android setting).
+### Evaluation
+- Synthetic scenario suite (`InferenceEvaluationTest`) covering normal nights, late nights, early wake, daytime inactivity, short interruptions, long gaps, and personalization cases
+- Baseline accuracy gate on controlled scenarios (raise the bar as the engine improves)
+
+### Privacy
+- On-device inference only
+- Usage Access timestamps + battery status; no message, photo, microphone, or contact access
+
+## How the MVP works
+
+1. User grants Usage Access.
 2. User enables Automatic Tracking.
-3. WorkManager periodically reads lightweight activity timestamps from the previous ~40 hours.
-4. The inference engine builds candidate inactivity windows, scores them, merges short interruptions, and keeps the highest-confidence nightly session.
+3. WorkManager periodically reads activity timestamps (~40 h lookback) and current battery state.
+4. `SmartSleepInference` generates candidates, merges short interruptions, scores with personal distributional stats, and keeps the best session.
 5. High-confidence results are saved locally (with overlap deduplication).
-6. The dashboard displays estimated sleep sessions.
+6. Dashboard shows estimated sleep with a simple confidence band.
 
-All inference runs on-device. The app does not need message contents, keyboard input, photos, microphone, or contacts.
+## Confidence breakdown (internal)
 
-## Tech stack
+Each candidate produces a transparent score map, for example:
 
-- Kotlin
-- Jetpack Compose + Material 3
-- Android UsageStats APIs
-- Room
-- WorkManager
-- JUnit
+```
+Duration          28/30
+Nighttime         25/25
+Bedtime match     14/15
+Wake match         9/12
+Screen quiet      10/10
+Charging           8/8
+Pattern match      4/5
+-----------------------
+Total             98/100  → High
+```
 
-## Privacy design principles
-
-- Prefer metadata timestamps over content
-- Keep raw signals and inference on-device
-- Store only aggregated sleep-session results by default
-- Never request message, photo, microphone, or contact permissions for the core feature
-
-## Known limitations (honest)
-
-- Phone left in another room / turned off / dead battery creates artificial inactivity → can produce false positives or false negatives.
-- Long intentional phone-free periods (studying, travel, meetings) can look like sleep.
-- First-phone-interaction after waking is only a proxy for wake time; true physiological wake may be earlier.
-- Charging signals improve confidence when available, but UsageEvents does not always surface them reliably on every OEM.
-- Personalization needs several nights of data before it becomes useful.
+The UI currently shows only the band ("High") while the full breakdown is available in logs and for future detail screens.
 
 ## Building
 
-Open the project in Android Studio (Hedgehog or newer recommended). Gradle wrapper is not yet checked in; use Android Studio’s built-in Gradle or generate the wrapper locally.
-
 ```bash
+# Preferred: Android Studio (Hedgehog or newer)
+# Or, after generating the full wrapper locally:
+./gradlew :app:testDebugUnitTest
 ./gradlew :app:assembleDebug
 ```
 
-Minimum SDK 26, target / compile SDK 35.
+If the binary `gradle-wrapper.jar` is missing, either:
+- Let Android Studio generate the wrapper, or
+- Run `gradle wrapper --gradle-version 8.11.1` if you have Gradle installed, or
+- Rely on the CI workflow which bootstraps Gradle via `setup-gradle`.
 
-## Next milestones
+Minimum SDK 26, target / compile SDK 35, Java 17.
 
-- Stronger signal collection (BatteryManager charging broadcasts, interactive state)
-- Richer personalization (rolling mean + std-dev of bedtime/wake)
-- Better handling of travel / multi-day gaps
-- Weekly consistency metrics and simple insights
-- Optional on-device ML model once sufficient labeled data exists
-- Data export / delete controls
-- Gradle wrapper + CI
+## Known limitations (honest)
+
+- Charging history is currently limited to the present state observed at inference time. Full POWER_CONNECTED / DISCONNECTED persistence is a planned improvement.
+- Phone left elsewhere, turned off, or dead battery still produces artificial inactivity.
+- Long intentional phone-free periods (travel, studying) can look like sleep; the nighttime + personalization filters reduce but do not eliminate this.
+- First phone interaction after waking is only a proxy for wake time.
+
+## Recommended next milestones (in order)
+
+1. Persist real charging start/stop events (BroadcastReceiver + small Room table) for true historical overlap.
+2. Expand the synthetic evaluation suite to hundreds of generated scenarios and track false-positive / false-negative rates, bedtime error, duration error.
+3. Optional detail UI that surfaces the confidence breakdown for power users / debugging.
+4. Only after a strong, measurable heuristic baseline: consider an on-device model that must demonstrably beat the current algorithm.
 
 ## License
 
-This is an early research / personal project. Treat it as experimental software.
+Experimental research / personal project software.
