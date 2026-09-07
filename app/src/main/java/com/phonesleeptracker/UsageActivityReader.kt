@@ -12,36 +12,37 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 class UsageActivityReader(private val context: Context) {
-    private val usageStatsManager =
-        context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+    private val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
 
     fun hasUsageAccess(): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = appOps.checkOpNoThrow(
+        return appOps.checkOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS,
             Process.myUid(),
             context.packageName
-        )
-        return mode == AppOpsManager.MODE_ALLOWED
+        ) == AppOpsManager.MODE_ALLOWED
     }
 
-    fun openUsageAccessSettings(): Intent =
-        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+    fun openUsageAccessSettings(): Intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
-    fun foregroundActivityTimes(startMillis: Long, endMillis: Long): List<LocalDateTime> {
+    fun phoneSignals(startMillis: Long, endMillis: Long): List<PhoneSignal> {
         val events = usageStatsManager.queryEvents(startMillis, endMillis)
-        val result = mutableListOf<LocalDateTime>()
+        val result = mutableListOf<PhoneSignal>()
         val event = UsageEvents.Event()
-
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
-                result += LocalDateTime.ofInstant(
-                    Instant.ofEpochMilli(event.timeStamp),
-                    ZoneId.systemDefault()
-                )
+            val time = LocalDateTime.ofInstant(Instant.ofEpochMilli(event.timeStamp), ZoneId.systemDefault())
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> result += PhoneSignal(time, PhoneSignal.Type.APP_RESUMED)
+                UsageEvents.Event.SCREEN_INTERACTIVE -> result += PhoneSignal(time, PhoneSignal.Type.SCREEN_ON)
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> result += PhoneSignal(time, PhoneSignal.Type.SCREEN_OFF)
             }
         }
-        return result
+        return result.distinctBy { it.time to it.type }
     }
+
+    fun foregroundActivityTimes(startMillis: Long, endMillis: Long): List<LocalDateTime> =
+        phoneSignals(startMillis, endMillis)
+            .filter { it.type == PhoneSignal.Type.APP_RESUMED }
+            .map { it.time }
 }
