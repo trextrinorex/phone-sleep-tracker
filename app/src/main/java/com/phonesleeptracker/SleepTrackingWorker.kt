@@ -7,8 +7,8 @@ import androidx.work.WorkerParameters
 
 /**
  * Periodic background worker that:
- * 1. Reads recent phone activity signals
- * 2. Runs the sleep inference engine
+ * 1. Reads recent phone activity + battery signals
+ * 2. Runs the sleep inference engine with personal stats
  * 3. Persists high-confidence sessions while avoiding duplicates
  */
 class SleepTrackingWorker(
@@ -27,16 +27,32 @@ class SleepTrackingWorker(
         val recentSessions = dao.getRecent(14)
         val personalStats = SleepTrackerRepository.computePersonalStats(recentSessions)
 
-        val candidate = SleepTrackerRepository(reader)
-            .inferRecentSleep(personalStats = personalStats)
-            ?.takeIf { it.confidence >= 65 }
+        val batteryReader = BatterySignalReader(applicationContext)
+        val repository = SleepTrackerRepository(reader)
+
+        // First pass without battery to get a candidate window, then enrich
+        val provisional = repository.inferRecentSleep(personalStats = personalStats)
             ?: return Result.success()
 
+        // Enrich signals with current charging state if applicable
+        val endMillis = System.currentTimeMillis()
+        val startMillis = endMillis - 40L * 60L * 60L * 1000L
+        val baseSignals = reader.phoneSignals(startMillis, endMillis)
+        val chargingSignals = batteryReader.chargingSignalsForWindow(provisional.session.start)
+        val enrichedSignals = (baseSignals + chargingSignals).sortedBy { it.time }
+
+        val finalResult = SmartSleepInference.infer(
+            signals = enrichedSignals,
+            personalStats = personalStats
+        )?.takeIf { it.session.confidence >= 65 }
+            ?: provisional.takeIf { it.session.confidence >= 65 }
+            ?: return Result.success()
+
+        val candidate = finalResult.session
         val zone = java.time.ZoneId.systemDefault()
         val startTime = candidate.start.atZone(zone).toInstant().toEpochMilli()
         val endTime = candidate.end.atZone(zone).toInstant().toEpochMilli()
 
-        // Avoid inserting near-duplicates (substantial temporal overlap)
         val overlapping = dao.findOverlapping(startTime, endTime)
         val isDuplicate = overlapping.any { existing ->
             val overlapStart = maxOf(existing.startEpochMillis, startTime)
@@ -57,7 +73,11 @@ class SleepTrackingWorker(
                     confidence = candidate.confidence
                 )
             )
-            Log.d(TAG, "Saved estimated sleep session confidence=${candidate.confidence}")
+            Log.d(
+                TAG,
+                "Saved estimated sleep session confidence=${candidate.confidence} " +
+                    "band=${finalResult.confidenceBand} breakdown=${finalResult.scoreBreakdown}"
+            )
         } else {
             Log.d(TAG, "Skipped overlapping session")
         }
