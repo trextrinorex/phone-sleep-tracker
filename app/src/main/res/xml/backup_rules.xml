@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Include the local sleep database so history survives backup/restore -->
+    <include domain="database" path="sleep_tracker.db" />
+    <include domain="sharedpref" path="tracking.xml" />
+</full-backup-content>
