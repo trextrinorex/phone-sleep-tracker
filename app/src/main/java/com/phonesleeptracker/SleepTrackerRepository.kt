@@ -2,26 +2,17 @@ package com.phonesleeptracker
 
 import java.time.LocalDateTime
 
-class SleepTrackerRepository(
-    private val activityReader: UsageActivityReader
-) {
+class SleepTrackerRepository(private val activityReader: UsageActivityReader) {
     fun inferFromActivity(activityTimes: List<LocalDateTime>): SleepSession? {
         if (activityTimes.size < 2) return null
-
-        val sorted = activityTimes.sorted()
-        var best: SleepSession? = null
-
-        sorted.zipWithNext().forEach { (previous, next) ->
-            val candidate = SleepInferenceEngine.infer(previous, next)
-            if (candidate != null && (best == null || candidate.durationMinutes > best!!.durationMinutes)) {
-                best = candidate
-            }
-        }
-        return best
+        return activityTimes.sorted().zipWithNext()
+            .mapNotNull { (previous, next) -> SleepInferenceEngine.infer(previous, next) }
+            .maxWithOrNull(compareBy<SleepSession> { it.confidence }.thenBy { it.durationMinutes })
     }
 
     fun inferRecentSleep(endMillis: Long = System.currentTimeMillis()): SleepSession? {
         val startMillis = endMillis - 36L * 60L * 60L * 1000L
-        return inferFromActivity(activityReader.foregroundActivityTimes(startMillis, endMillis))
+        val result = SmartSleepInference.infer(activityReader.phoneSignals(startMillis, endMillis))
+        return result?.session ?: inferFromActivity(activityReader.foregroundActivityTimes(startMillis, endMillis))
     }
 }
