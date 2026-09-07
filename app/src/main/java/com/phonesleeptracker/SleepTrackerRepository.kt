@@ -3,6 +3,7 @@ package com.phonesleeptracker
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlin.math.abs
 
 class SleepTrackerRepository(
     private val activityReader: UsageActivityReader
@@ -15,14 +16,10 @@ class SleepTrackerRepository(
             .maxWithOrNull(compareBy<SleepSession> { it.confidence }.thenBy { it.durationMinutes })
     }
 
-    /**
-     * Main entry point used by the background worker.
-     * Looks at the last ~40 hours of signals and returns the best sleep estimate.
-     */
     fun inferRecentSleep(
         endMillis: Long = System.currentTimeMillis(),
         personalStats: SmartSleepInference.PersonalStats = SmartSleepInference.PersonalStats()
-    ): SleepSession? {
+    ): SmartSleepInference.Result? {
         val startMillis = endMillis - 40L * 60L * 60L * 1000L
         val signals = activityReader.phoneSignals(startMillis, endMillis)
 
@@ -30,50 +27,82 @@ class SleepTrackerRepository(
             signals = signals,
             personalStats = personalStats
         )
-        if (smart != null) return smart.session
+        if (smart != null) return smart
 
-        // Fallback to the simpler engine
-        return inferFromActivity(activityReader.foregroundActivityTimes(startMillis, endMillis))
+        // Fallback to the simpler engine (no breakdown)
+        val simple = inferFromActivity(activityReader.foregroundActivityTimes(startMillis, endMillis))
+        return simple?.let {
+            SmartSleepInference.Result(
+                session = it,
+                scoreBreakdown = mapOf("fallback" to it.confidence)
+            )
+        }
     }
 
     companion object {
+        private const val HISTORY_LIMIT = 14
+
         /**
-         * Build simple personal statistics from previously stored sessions.
-         * Uses the most recent N nights. Returns empty stats when history is insufficient.
+         * Build robust personal statistics from previously stored sessions.
+         * Uses median + median absolute deviation (MAD) for resistance to outlier nights.
          */
         fun computePersonalStats(sessions: List<SleepSessionEntity>): SmartSleepInference.PersonalStats {
-            if (sessions.size < 3) return SmartSleepInference.PersonalStats()
+            val recent = sessions.take(HISTORY_LIMIT)
+            if (recent.size < 3) return SmartSleepInference.PersonalStats(sampleSize = recent.size)
 
             val zone = ZoneId.systemDefault()
-            val bedtimes = sessions.mapNotNull {
-                try {
-                    LocalDateTime.ofInstant(
-                        java.time.Instant.ofEpochMilli(it.startEpochMillis), zone
-                    ).toLocalTime()
-                } catch (_: Exception) { null }
-            }
-            val wakeTimes = sessions.mapNotNull {
-                try {
-                    LocalDateTime.ofInstant(
-                        java.time.Instant.ofEpochMilli(it.endEpochMillis), zone
-                    ).toLocalTime()
-                } catch (_: Exception) { null }
-            }
-            val durations = sessions.map { it.durationMinutes }
 
-            fun averageTime(times: List<LocalTime>): LocalTime? {
-                if (times.isEmpty()) return null
-                // Convert to minutes past midnight, average, convert back
-                val minutes = times.map { it.toSecondOfDay() / 60 }
-                val avg = minutes.average().toInt()
-                return LocalTime.of(avg / 60, avg % 60)
-            }
+            fun toLocalTime(epoch: Long): LocalTime? = try {
+                LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(epoch), zone).toLocalTime()
+            } catch (_: Exception) { null }
+
+            val bedtimes = recent.mapNotNull { toLocalTime(it.startEpochMillis) }
+            val wakeTimes = recent.mapNotNull { toLocalTime(it.endEpochMillis) }
+            val durations = recent.map { it.durationMinutes }
 
             return SmartSleepInference.PersonalStats(
-                typicalBedtime = averageTime(bedtimes),
-                typicalWakeTime = averageTime(wakeTimes),
-                meanDurationMinutes = durations.average().toLong()
+                medianBedtime = medianTime(bedtimes),
+                bedtimeMadMinutes = madMinutes(bedtimes),
+                medianWakeTime = medianTime(wakeTimes),
+                wakeMadMinutes = madMinutes(wakeTimes),
+                medianDurationMinutes = medianLong(durations),
+                durationMadMinutes = madLong(durations),
+                sampleSize = recent.size
             )
+        }
+
+        private fun medianTime(times: List<LocalTime>): LocalTime? {
+            if (times.isEmpty()) return null
+            // Convert to minutes past midnight, take median, convert back
+            val minutes = times.map { it.toSecondOfDay() / 60 }.sorted()
+            val mid = minutes[minutes.size / 2]
+            return LocalTime.of(mid / 60, mid % 60)
+        }
+
+        private fun madMinutes(times: List<LocalTime>): Int {
+            if (times.size < 2) return 30 // default spread
+            val median = medianTime(times) ?: return 30
+            val deviations = times.map { minutesBetween(it, median).toInt() }.sorted()
+            return deviations[deviations.size / 2].coerceAtLeast(15)
+        }
+
+        private fun medianLong(values: List<Long>): Long? {
+            if (values.isEmpty()) return null
+            val sorted = values.sorted()
+            return sorted[sorted.size / 2]
+        }
+
+        private fun madLong(values: List<Long>): Int {
+            if (values.size < 2) return 40
+            val med = medianLong(values) ?: return 40
+            val deviations = values.map { abs(it - med).toInt() }.sorted()
+            return deviations[deviations.size / 2].coerceAtLeast(20)
+        }
+
+        private fun minutesBetween(a: LocalTime, b: LocalTime): Long {
+            val diff = java.time.Duration.between(a, b).toMinutes()
+            val absDiff = abs(diff)
+            return minOf(absDiff, 1440 - absDiff)
         }
     }
 }
