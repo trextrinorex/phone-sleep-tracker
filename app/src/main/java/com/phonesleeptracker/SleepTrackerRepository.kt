@@ -2,13 +2,10 @@ package com.phonesleeptracker
 
 import java.time.LocalDateTime
 
-/** Coordinates raw phone activity and inference. Persistence will be added next. */
 class SleepTrackerRepository(
     private val activityReader: UsageActivityReader
 ) {
-    fun inferFromActivity(
-        activityTimes: List<LocalDateTime>
-    ): SleepSession? {
+    fun inferFromActivity(activityTimes: List<LocalDateTime>): SleepSession? {
         if (activityTimes.size < 2) return null
 
         val sorted = activityTimes.sorted()
@@ -21,5 +18,10 @@ class SleepTrackerRepository(
             }
         }
         return best
+    }
+
+    fun inferRecentSleep(endMillis: Long = System.currentTimeMillis()): SleepSession? {
+        val startMillis = endMillis - 36L * 60L * 60L * 1000L
+        return inferFromActivity(activityReader.foregroundActivityTimes(startMillis, endMillis))
     }
 }
