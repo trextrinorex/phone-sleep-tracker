@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phone Sleep Tracker</string>
+    <string name="disclaimer">Sleep duration is estimated from smartphone activity and may be inaccurate. This app is not a medical device and does not measure sleep stages, heart rate, or blood oxygen.</string>
+    <string name="permission_title">One permission needed</string>
+    <string name="permission_body">Usage Access lets the app see lightweight activity timestamps (when apps come to the foreground and screen interactive state). It does not read messages, passwords, photos, or microphone audio.</string>
+    <string name="grant_usage_access">Grant Usage Access</string>
+    <string name="check_permission_again">I granted it – check again</string>
+    <string name="tracking_title">Automatic tracking</string>
+    <string name="start_tracking">Start tracking</string>
+    <string name="stop_tracking">Stop tracking</string>
+    <string name="history_title">Estimated sleep history</string>
+    <string name="empty_history">No sleep session estimated yet. Leave tracking on overnight and check back in the morning.</string>
+    <string name="privacy_footer">All processing happens on your device. Raw activity events are not uploaded.</string>
+</resources>
