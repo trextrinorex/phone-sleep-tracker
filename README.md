@@ -1,102 +1,87 @@
-# Phone Sleep Tracker
+# Phone Sleep Tracker v1.0.0
 
-Privacy-first Android app that **estimates** sleep periods using only the smartphone.
+Privacy-first Android app that **estimates** sleep periods using only your smartphone.
 
-No smartwatch, fitness band, ring, or external sensor is required.
+No smartwatch, fitness band, ring, or external sensor required.
 
-## Important disclaimer
+## Disclaimer
 
-This application produces **estimated** sleep windows derived from passive phone behavior.
-It is **not** a medical device and does **not** measure:
+This application produces **estimated** sleep windows derived from passive phone behavior.  
+It is **not** a medical device and does **not** measure sleep stages, heart rate, or blood oxygen.
 
-- REM / deep / light sleep stages
-- Heart rate
-- Blood oxygen (SpO₂)
-- Respiratory rate
+Confidence scores are heuristic, not scientifically validated accuracy percentages.
 
-Never treat the numbers as clinical truth. Confidence scores are heuristic, not scientifically validated accuracy percentages.
+## What works in v1.0.0
 
-## Current status (v0.4.0)
-
-### Build & CI foundation
-- Gradle Wrapper configuration (Gradle 8.11.1)
-- GitHub Actions CI: unit tests + `assembleDebug` on every push/PR to `main`
-- Debug APK uploaded as CI artifact
-
-### Inference engine
-- Multi-signal candidate detection (4–14 h inactivity)
-- Brief interruption merging
-- Transparent multi-factor scoring with full breakdown
-- BatteryManager charging signal as *supporting evidence only*
-- Robust 14-night personalization using **median + MAD** (median absolute deviation)
+- Clean Material 3 UI with permanent non-medical disclaimer
+- Usage Access onboarding
+- Background tracking via WorkManager
+- Multi-signal sleep inference (duration, nighttime, charging support, screen quiet, personal history)
+- Robust 14-night personalization (median + MAD)
+- Session merging for short interruptions
 - Overlap-based duplicate protection
-- Confidence bands: High / Moderate / Low
+- Local Room database
+- Transparent confidence breakdown (internal)
+- Unit tests + synthetic evaluation suite
+- GitHub Actions CI that builds both debug and release APKs
 
-### Evaluation
-- Synthetic scenario suite (`InferenceEvaluationTest`) covering normal nights, late nights, early wake, daytime inactivity, short interruptions, long gaps, and personalization cases
-- Baseline accuracy gate on controlled scenarios (raise the bar as the engine improves)
+## Install on your phone (recommended ways)
 
-### Privacy
-- On-device inference only
-- Usage Access timestamps + battery status; no message, photo, microphone, or contact access
+### Method 1 – Android Studio (most reliable)
+1. Install Android Studio (Hedgehog or newer).
+2. Open this repository.
+3. Let it sync Gradle.
+4. Connect your phone (USB debugging enabled).
+5. Click the green **Run** button.
 
-## How the MVP works
+### Method 2 – Download APK from GitHub Actions
+1. Go to the **Actions** tab of this repository.
+2. Open the latest green (successful) workflow run.
+3. Download the **`app-debug`** artifact.
+4. Unzip → transfer the `.apk` to your phone.
+5. Open the APK and allow installation from unknown sources.
 
-1. User grants Usage Access.
-2. User enables Automatic Tracking.
-3. WorkManager periodically reads activity timestamps (~40 h lookback) and current battery state.
-4. `SmartSleepInference` generates candidates, merges short interruptions, scores with personal distributional stats, and keeps the best session.
-5. High-confidence results are saved locally (with overlap deduplication).
-6. Dashboard shows estimated sleep with a simple confidence band.
+> The first CI run after this release should produce downloadable APKs automatically.
 
-## Confidence breakdown (internal)
+### After installing
+1. Open the app.
+2. Tap **Grant Usage Access** and enable the permission for Phone Sleep Tracker.
+3. Return to the app and tap **Start tracking**.
+4. Leave the app running in the background overnight.
+5. Check the history the next morning.
 
-Each candidate produces a transparent score map, for example:
+## Privacy
 
-```
-Duration          28/30
-Nighttime         25/25
-Bedtime match     14/15
-Wake match         9/12
-Screen quiet      10/10
-Charging           8/8
-Pattern match      4/5
------------------------
-Total             98/100  → High
-```
+- All inference runs on-device.
+- Only activity timestamps and battery state are used.
+- No messages, photos, microphone, contacts, or passwords are accessed.
+- Sleep history is stored only in the local Room database.
 
-The UI currently shows only the band ("High") while the full breakdown is available in logs and for future detail screens.
+## Tech stack
 
-## Building
+- Kotlin
+- Jetpack Compose + Material 3
+- Room
+- WorkManager
+- Android UsageStats + BatteryManager
+- JUnit
+
+## Building from source
 
 ```bash
-# Preferred: Android Studio (Hedgehog or newer)
-# Or, after generating the full wrapper locally:
-./gradlew :app:testDebugUnitTest
-./gradlew :app:assembleDebug
+gradle :app:testDebugUnitTest
+gradle :app:assembleDebug
+gradle :app:assembleRelease   # unsigned
 ```
 
-If the binary `gradle-wrapper.jar` is missing, either:
-- Let Android Studio generate the wrapper, or
-- Run `gradle wrapper --gradle-version 8.11.1` if you have Gradle installed, or
-- Rely on the CI workflow which bootstraps Gradle via `setup-gradle`.
+Minimum SDK 26 · Target / Compile SDK 35 · Java 17
 
-Minimum SDK 26, target / compile SDK 35, Java 17.
+## Known limitations
 
-## Known limitations (honest)
-
-- Charging history is currently limited to the present state observed at inference time. Full POWER_CONNECTED / DISCONNECTED persistence is a planned improvement.
-- Phone left elsewhere, turned off, or dead battery still produces artificial inactivity.
-- Long intentional phone-free periods (travel, studying) can look like sleep; the nighttime + personalization filters reduce but do not eliminate this.
-- First phone interaction after waking is only a proxy for wake time.
-
-## Recommended next milestones (in order)
-
-1. Persist real charging start/stop events (BroadcastReceiver + small Room table) for true historical overlap.
-2. Expand the synthetic evaluation suite to hundreds of generated scenarios and track false-positive / false-negative rates, bedtime error, duration error.
-3. Optional detail UI that surfaces the confidence breakdown for power users / debugging.
-4. Only after a strong, measurable heuristic baseline: consider an on-device model that must demonstrably beat the current algorithm.
+- Charging history is currently based on present state at inference time (full historical POWER_CONNECTED persistence is planned).
+- Long intentional phone-free periods can still produce false candidates; nighttime + personalization filters reduce this.
+- First phone interaction after waking is only a proxy for true wake time.
 
 ## License
 
-Experimental research / personal project software.
+Experimental personal / research software. Use at your own risk.
