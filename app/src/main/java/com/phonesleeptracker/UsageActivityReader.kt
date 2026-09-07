@@ -1,9 +1,11 @@
 package com.phonesleeptracker
 
+import android.app.AppOpsManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.os.Process
 import android.provider.Settings
 import java.time.Instant
 import java.time.LocalDateTime
@@ -14,15 +16,18 @@ class UsageActivityReader(private val context: Context) {
         context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
 
     fun hasUsageAccess(): Boolean {
-        val now = System.currentTimeMillis()
-        val events = usageStatsManager.queryEvents(now - 60_000, now)
-        return events != null
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = appOps.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            Process.myUid(),
+            context.packageName
+        )
+        return mode == AppOpsManager.MODE_ALLOWED
     }
 
     fun openUsageAccessSettings(): Intent =
         Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
-    /** Returns timestamps for foreground app transitions in the requested window. */
     fun foregroundActivityTimes(startMillis: Long, endMillis: Long): List<LocalDateTime> {
         val events = usageStatsManager.queryEvents(startMillis, endMillis)
         val result = mutableListOf<LocalDateTime>()
