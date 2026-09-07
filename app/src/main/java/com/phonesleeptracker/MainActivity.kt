@@ -7,7 +7,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -57,6 +57,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshAccess()
+    }
+
     private fun refreshAccess() {
         accessState = usageReader.hasUsageAccess()
     }
@@ -75,20 +80,41 @@ private fun SleepTrackerHome(
         SleepTrackerDatabase.getInstance(context).sleepSessionDao().observeAll()
     }.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    LaunchedEffect(hasUsageAccess) {
+    LaunchedEffect(hasUsageAccess, tracking) {
         if (hasUsageAccess && tracking) TrackingScheduler.start(context)
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("Sleep Tracker", style = MaterialTheme.typography.headlineLarge)
+            Text("Phone Sleep Tracker", style = MaterialTheme.typography.headlineLarge)
             Text(
-                "Estimate sleep from passive phone activity. No smartwatch required.",
-                modifier = Modifier.padding(top = 6.dp)
+                "Estimate sleep from passive smartphone activity. No smartwatch or wearable required.",
+                modifier = Modifier.padding(top = 6.dp),
+                style = MaterialTheme.typography.bodyMedium
             )
+        }
+
+        // Permanent disclaimer
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                )
+            ) {
+                Text(
+                    "Sleep duration is estimated from smartphone activity and may be inaccurate. " +
+                        "This app is not a medical device and does not measure sleep stages, " +
+                        "heart rate, or blood oxygen.",
+                    modifier = Modifier.padding(14.dp),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
 
         if (!hasUsageAccess) {
@@ -97,12 +123,17 @@ private fun SleepTrackerHome(
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("One permission needed", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Usage access lets the app see lightweight app activity timestamps. It does not read messages or passwords.",
+                            "Usage Access lets the app see lightweight activity timestamps " +
+                                "(when apps come to the foreground and screen interactive state). " +
+                                "It does not read messages, passwords, photos, or microphone audio.",
                             modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
                         )
-                        Button(onClick = onOpenSettings) { Text("Grant usage access") }
-                        OutlinedButton(onClick = onRefreshAccess, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("I granted it")
+                        Button(onClick = onOpenSettings) { Text("Grant Usage Access") }
+                        OutlinedButton(
+                            onClick = onRefreshAccess,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("I granted it – check again")
                         }
                     }
                 }
@@ -114,7 +145,13 @@ private fun SleepTrackerHome(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("Automatic tracking", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        if (tracking) "Background checks are enabled." else "Turn this on once and the app will periodically look for likely sleep periods.",
+                        if (tracking) {
+                            "Background checks are enabled. The app will periodically look for " +
+                                "likely sleep periods using on-device inference."
+                        } else {
+                            "Turn this on once. The app will periodically process activity " +
+                                "timestamps and estimate sleep windows locally."
+                        },
                         modifier = Modifier.padding(top = 6.dp, bottom = 12.dp)
                     )
                     Button(
@@ -122,25 +159,51 @@ private fun SleepTrackerHome(
                         onClick = {
                             tracking = !tracking
                             prefs.edit().putBoolean("enabled", tracking).apply()
-                            if (tracking) TrackingScheduler.start(context) else TrackingScheduler.stop(context)
+                            if (tracking) TrackingScheduler.start(context)
+                            else TrackingScheduler.stop(context)
                         }
-                    ) { Text(if (tracking) "Stop tracking" else "Start tracking") }
+                    ) {
+                        Text(if (tracking) "Stop tracking" else "Start tracking")
+                    }
                 }
             }
         }
 
         item {
             Text("Estimated sleep history", style = MaterialTheme.typography.titleLarge)
+            if (sessions.isNotEmpty()) {
+                val avg = sessions.take(7).map { it.durationMinutes }.average()
+                val hours = (avg / 60).toInt()
+                val mins = (avg % 60).toInt()
+                Text(
+                    "7-night average (estimated): ${hours}h ${mins}m",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
         }
 
         if (sessions.isEmpty()) {
             item {
-                Text("No sleep session detected yet. Leave tracking on overnight and check back in the morning.")
+                Text(
+                    "No sleep session estimated yet. Leave tracking on overnight and check back " +
+                        "in the morning. Estimates appear after the phone detects a sufficiently " +
+                        "long inactivity window that scores as likely sleep."
+                )
             }
         } else {
-            items(sessions.take(7), key = { it.id }) { session ->
+            items(sessions.take(14), key = { it.id }) { session ->
                 SleepSessionCard(session)
             }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                "All processing happens on your device. Raw activity events are not uploaded.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -154,11 +217,24 @@ private fun SleepSessionCard(session: SleepSessionEntity) {
     val hours = session.durationMinutes / 60
     val minutes = session.durationMinutes % 60
 
+    val confidenceLabel = when {
+        session.confidence >= 80 -> "High"
+        session.confidence >= 60 -> "Moderate"
+        else -> "Low"
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("$hours h $minutes min", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "Estimated ${hours}h ${minutes}m",
+                style = MaterialTheme.typography.headlineSmall
+            )
             Text("$start → $end", modifier = Modifier.padding(top = 4.dp))
-            Text("Confidence: ${session.confidence}%", modifier = Modifier.padding(top = 4.dp))
+            Text(
+                "Confidence: $confidenceLabel (${session.confidence}%)",
+                modifier = Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }
